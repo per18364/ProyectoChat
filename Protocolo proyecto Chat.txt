@@ -1,0 +1,109 @@
+﻿syntax=”proto2”;
+ [a][b]
+package chat;
+
+
+// Registrar nuevo usuario
+// el nombre de usuario “all” debe ser rechazado, ya que está reservado por otras funcionalidades
+message UserRegistration {
+        optional string username = 1;
+        optional string ip = 2;
+}
+
+
+// Cambiar estado de usuario
+message ChangeStatus {
+        optional string username = 1;
+        optional string status = 2;
+}
+
+
+// Mandar un mensaje
+// all = todos los usuarios
+// (username) = usuario específico
+message Message {
+        optional string receiver = 1;
+        optional string sender = 2;
+        optional string text = 3;[c][d][e]
+}
+
+
+// Obtener informacion de usuario
+message UserInformation {
+        optional string username = 1;
+        optional string ip = 2;
+        optional string status = 3;[f]
+}
+
+
+// Solicitud de información de usuario/s
+// user (all) = todos los usuarios
+// user (username) = usuario en específico
+message UserRequest {
+        optional string user = 1;
+}
+
+
+// Mostrar usuarios conectados
+message ConnectedUsers {
+        repeated UserInformation users = 1;
+}
+
+
+// Solicitud de cliente
+// option (0) = Registro de usuario
+// option (1) = Listado de usuarios conectados
+// option (2) = Información de usuario
+// option (3) = Cambio de estado
+// option (4) = mensaje
+message ClientRequest {
+        enum Option
+        {
+                USER_LOGIN = 0;
+                CONNECTED_USERS = 1;
+                USER_INFORMATION = 2;
+                STATUS_CHANGE = 3;
+                SEND_MESSAGE = 4;
+}
+        optional Option option = 1;
+        optional UserRegistration newuser = 2;
+        optional UserRequest user = 3;
+        optional ChangeStatus status = 4;
+        optional Message messg = 5;
+}
+
+
+// Respuesta del servidor
+// option (0) = Registro de usuario
+// option (1) = Listado de usuarios conectados
+// option (2) = Información de usuario
+// option (3) = Cambio de estado
+// option (4) = mensaje
+message ServerResponse {
+        enum Option
+        {
+                USER_LOGIN = 0;
+                CONNECTED_USERS = 1;
+                USER_INFORMATION = 2;
+                STATUS_CHANGE = 3;
+                SEND_MESSAGE = 4;
+}
+        optional Option option = 1;
+        enum Code 
+{        
+        FAILED_OPERATION = 0;
+        SUCCESSFUL_OPERATION = 1;
+}
+        optional Code code = 2;
+        optional string response = 3;
+        optional ConnectedUsers users = 4;
+        optional UserInformation user = 5;
+        optional Message messg = 6;
+        optional ChangeStatus status = 7;
+}
+[a]Asumo que todos vamos a hacer Big Endian o nos tiramos a la brava?
+[b]Creo que quedaria mejor con Big Endian
+[c]Esto no debería ser obligatorio en vez de opcional?
+[d]Pienso que es mejor opcional,  para el manejo de errores. Si un usuario manda un mensaje vacio, el valor por default con la opcion "optional", es la cadena vacia. Con la opcion "required", el mensaje debe contener algun valor, de lo contrario se considera como "uninitialized".
+[e]https://developers.google.com/protocol-buffers/docs/cpptutorial#defining-your-protocol-format
+[f]no me convence que sea opcional
