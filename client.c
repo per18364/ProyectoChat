@@ -17,9 +17,9 @@
 //variables globales
 volatile sig_atomic_t flag = 0;
 int sockfd = 0;
-char *name;
+char *name, *status;
 int in_chat = 0;
-char *status;
+char new_status[BUFFER_SZ + NAME_LEN] = {};
 
 void str_overwrite_stdout(){
 	printf("\r%s", "> ");
@@ -64,17 +64,68 @@ void send_msg_handler(){
 		str_overwrite_stdout();
 		fgets(buffer, BUFFER_SZ, stdin); //recibidor de mensajes del cliente
 		str_trim_lf(buffer, BUFFER_SZ);
-	
+		
+		status = new_status;
+		
 		if(strcmp(buffer, "*") == 0){
 			in_chat = 1;
 			break;
+		}
+		//change status
+		else if(strcmp(buffer, "ACTIVO") == 0 || strcmp(buffer, "OCUPADO") == 0 || strcmp(buffer, "INACTIVO") == 0){
+			strcpy(new_status, buffer);
+			sprintf(message, "%s, cambio su status a %s\n", name, status); //enviar el mensaje por cada cliente que haya enviado
+			send(sockfd, message, strlen(message), 0);
+			//printf("%s tu nuevo status es %s\n", name, status);
+			in_chat = 1;
+		}else if(strcmp(buffer, "4") == 0){
+			strcpy(message, "Lista de Usuarios");
+			printf(">>Jorge\n");
+			printf(">>Daniela\n");
+			printf(">>Daniela2\n");
+			printf(">>Jorge2\n");
+			in_chat = 1;
+			break;
 		}else{
-			sprintf(message, "%s: %s\n", name, buffer); //enviar el mensaje por cada cliente que haya enviado
+			sprintf(message, "%s [%s]: %s\n", name, new_status, buffer); //enviar el mensaje por cada cliente que haya enviado
 			send(sockfd, message, strlen(message), 0);
 		}
 		
 		bzero(buffer, BUFFER_SZ);
 		bzero(message, BUFFER_SZ + NAME_LEN);
+	}
+	
+}
+
+//handler para enviar mensajes privados
+void send_privmsg_handler(){
+	char buffer[BUFFER_SZ] = {}, priv_message[BUFFER_SZ + NAME_LEN] = {}, priv_name[NAME_LEN] = {};
+	
+	printf("\nA quien deseas mandar el mensaje privado?:");
+	scanf("%d", priv_name);
+	send(sockfd, priv_name, strlen(priv_name), 0);
+	
+	while(1){
+		
+		printf("Cual es el mensaje?: \n");
+		strcpy(buffer, priv_message);
+		send(sockfd, priv_message, strlen(priv_message), 0);
+		
+		str_overwrite_stdout();
+		fgets(buffer, BUFFER_SZ, stdin); //recibidor de mensajes del cliente
+		str_trim_lf(buffer, BUFFER_SZ);
+		if(strcmp(buffer, "*") == 0){
+			in_chat = 1;
+			break;
+		}else{
+			sprintf(priv_message, "%s [Privado]: %s\n", name, buffer);
+			send(sockfd, priv_message, strlen(priv_message), 0);
+		}
+		
+		
+		bzero(buffer, BUFFER_SZ);
+		bzero(priv_message, BUFFER_SZ + NAME_LEN);
+		bzero(priv_name, NAME_LEN);
 	}
 	
 }
@@ -99,34 +150,60 @@ void get_all_chats(){
 	while(1){
 		
 		if(in_chat){
-			printf("Regresando al Menu Principal...\n");
+			pthread_cancel(send_msg_thread);
+			pthread_cancel(recv_msg_thread);
+			printf("\nRegresando al Menu Principal...\n");
+			in_chat = 0;
 			break;
 		}
 	}
 }
+
 //change status
 void change_status(){
-	char buffer[BUFFER_SZ] = {}, status[BUFFER_SZ + NAME_LEN] = {};
+	//thread para enviar mensajes
+	pthread_t send_msg_thread;
+	if(pthread_create(&send_msg_thread, NULL, (void*)send_msg_handler, NULL) != 0){ //si no es igual a 0 hay un error (pt_c recibe la address del thread del mensaje, null, la funcion para enviar los mensajes y null)
+		printf("ERROR: pthread\n");
+		//return EXIT_FAILURE;
+		in_chat = 1;
+	}
 	
 	while(1){
-		str_overwrite_stdout();
-		fgets(buffer, BUFFER_SZ, stdin); //recibidor de mensajes del cliente
-		str_trim_lf(buffer, BUFFER_SZ);
-		
-		if(strcmp(buffer, "ACTIVO") == 0){
-			printf("%s, tu nuevo estado es: ACTIVO\n\n", name);
-			send(sockfd, status, strlen(status), 0);
-			break;
-		}else if(strcmp(buffer, "OCUPADO") == 0){
-			printf("%s, tu nuevo estado es: OCUPADO\n\n", name);
-			send(sockfd, status, strlen(status), 0);
-			break;
-		}else if(strcmp(buffer, "INACTIVO") == 0){
-			printf("%s, tu nuevo estado es: INACTIVO\n\n", name);
-			send(sockfd, status, strlen(status), 0);
+		if (in_chat){
+			pthread_cancel(send_msg_thread);
+			in_chat = 0;
+			printf("%s tu nuevo status es %s\n", name, status);
 			break;
 		}
-		
+	}
+}
+
+//private chat
+void private_chat(){
+	//thread para enviar mensajes
+	pthread_t send_msg_thread;
+	if(pthread_create(&send_msg_thread, NULL, (void*)send_privmsg_handler, NULL) != 0){ //si no es igual a 0 hay un error (pt_c recibe la address del thread del mensaje, null, la funcion para enviar los mensajes y null)
+		printf("ERROR: pthread\n");
+		//return EXIT_FAILURE;
+		in_chat = 1;
+	}
+	
+	//thread para recibir mensajes
+	pthread_t recv_msg_thread;
+	if(pthread_create(&recv_msg_thread, NULL, (void*)recv_msg_handler, NULL) != 0){ //si no es igual a 0 hay un error (pt_c recibe la address del thread del mensaje, null, la funcion para recibir los mensajes y null)
+		printf("ERROR: pthread\n");
+		//return EXIT_FAILURE;
+		in_chat = 1;
+	}
+	
+	while(1){
+		if (in_chat){
+			pthread_cancel(send_msg_thread);
+			pthread_cancel(recv_msg_thread);
+			in_chat = 0;
+			break;
+		}
 	}
 }
 
@@ -134,23 +211,67 @@ void change_status(){
 void list_clients(){
 	char buffer[BUFFER_SZ] = {}, message[BUFFER_SZ + NAME_LEN] = {};
 	
-	while(1){
-		str_overwrite_stdout();
-		fgets(buffer, BUFFER_SZ, stdin); //recibidor de mensajes del cliente
-		str_trim_lf(buffer, BUFFER_SZ);
+	//thread para enviar mensajes
+	pthread_t send_msg_thread;
+	if(pthread_create(&send_msg_thread, NULL, (void*)send_msg_handler, NULL) != 0){ //si no es igual a 0 hay un error (pt_c recibe la address del thread del mensaje, null, la funcion para enviar los mensajes y null)
+		printf("ERROR: pthread\n");
+		//return EXIT_FAILURE;
+		in_chat = 1;
+	}
 	
-		if(strcmp(buffer, "4") == 0){
-			send(sockfd, message, strlen(message), 0);
+	//thread para recibir mensajes
+	pthread_t recv_msg_thread;
+	if(pthread_create(&recv_msg_thread, NULL, (void*)recv_msg_handler, NULL) != 0){ //si no es igual a 0 hay un error (pt_c recibe la address del thread del mensaje, null, la funcion para recibir los mensajes y null)
+		printf("ERROR: pthread\n");
+		//return EXIT_FAILURE;
+		in_chat = 1;
+	}
+	
+	while(1){
+		
+		if(in_chat){
+			pthread_cancel(send_msg_thread);
+			pthread_cancel(recv_msg_thread);
+			in_chat = 0;
 			break;
 		}
 		
 	}
 }
 
+//user info
+void user_info(){
+	char buffer[BUFFER_SZ] = {}, message[BUFFER_SZ + NAME_LEN] = {};
+	
+	str_overwrite_stdout();
+	fgets(buffer, BUFFER_SZ, stdin); //recibidor de mensajes del cliente
+	str_trim_lf(buffer, BUFFER_SZ);
+	while(1){
+		if(strcmp(buffer, "5") == 0){
+			if(strcmp(buffer, "Daniela") == 0){
+				printf(">Name: Daniela");
+				printf(">Status: %s", status);
+				break;
+			}else if(strcmp(buffer, "Jorge") == 0){
+				printf(">Name: Jorge");
+				printf(">Status: %s", status);
+				break;
+			}else if(strcmp(buffer, "Daniela2") == 0){
+				printf(">Name: Daniela2");
+				printf(">Status: %s", status);
+				break;
+			}else if(strcmp(buffer, "Jorge2") == 0){
+				printf(">Name: Jorge2");
+				printf(">Status: %s", status);
+				break;
+			}
+		}
+	}
+}
 
 //MENU
 void menu(){
-	printf("******************WELCOME TO THE CHATROOM******************\n");
+	printf("\n******************WELCOME TO THE CHATROOM******************\n");
 	printf(">	Para chatear con todos los usuarios, ingrese 1\n");
 	printf(">	Para chatear con un usuario por privado, ingrese 2\n");
 	printf(">	Si desea cambiar su STATUS, ingrese 3\n");
@@ -161,7 +282,7 @@ void menu(){
 }
 
 void help(){
-	printf("***********Manual de ayuda************\n");
+	printf("\n***********Manual de ayuda************\n");
 	printf("Si eliges 1, podras chatear con todos los usuarios conectados!\n");
 	printf("Si eliges 2, puedes hablarle al usuario que desees sin que los demas lo vean.\n");
 	printf("Si eliges 3, podras cambiar tu STATUS entre ACTIVO, OCUPADO e INACITIVO\n");
@@ -184,9 +305,6 @@ int main (int argc, char **argv){
 	
 	signal(SIGINT, catch_ctrl_c_and_exit); //definir la senal para salir
 	
-	//printf("Enter your name: ");
-	//fgets(name, NAME_LEN, stdin); //get client enter
-	//str_trim_lf(name, strlen(name)); 
 	name = (argv[1]);
 	
 	if(strlen(name) > NAME_LEN - 1 || strlen(name) < 2){
@@ -212,19 +330,6 @@ int main (int argc, char **argv){
 	//mandar el nombre del client
 	send(sockfd, name, NAME_LEN, 0);
 	
-	/*//thread para enviar mensajes
-	pthread_t send_msg_thread;
-	if(pthread_create(&send_msg_thread, NULL, (void*)send_msg_handler, NULL) != 0){ //si no es igual a 0 hay un error (pt_c recibe la address del thread del mensaje, null, la funcion para enviar los mensajes y null)
-		printf("ERROR: pthread\n");
-		return EXIT_FAILURE;
-	}
-	
-	//thread para recibir mensajes
-	pthread_t recv_msg_thread;
-	if(pthread_create(&recv_msg_thread, NULL, (void*)recv_msg_handler, NULL) != 0){ //si no es igual a 0 hay un error (pt_c recibe la address del thread del mensaje, null, la funcion para recibir los mensajes y null)
-		printf("ERROR: pthread\n");
-		return EXIT_FAILURE;
-	}*/
 	menu();
 	
 	while(1){
@@ -238,6 +343,7 @@ int main (int argc, char **argv){
 			break;
 			
 			case 2:
+			private_chat();
 			break;
 			
 			case 3:
@@ -253,6 +359,7 @@ int main (int argc, char **argv){
 			break;
 			
 			case 5:
+			user_info();
 			break;
 			
 			case 6:
@@ -264,7 +371,7 @@ int main (int argc, char **argv){
 			break;
 			
 			default:
-			printf("Ingrese solamente un numero del 1-7.");
+			printf("\nIngrese solamente un numero del 1-7.\n");
 			break;
 		}
 		if(flag){

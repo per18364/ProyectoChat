@@ -21,7 +21,7 @@ static int uid = 10;
 typedef struct{
 	struct sockaddr_in address;
 	int sockfd, uid;
-	char name[NAME_LEN], status[];
+	char name[NAME_LEN], status[NAME_LEN];
 } client_t;
 
 client_t *clients[MAX_CLIENTS];
@@ -33,9 +33,9 @@ void str_overwrite_stdout(){
 	fflush(stdout); //flush standard output
 }
 
-void str_trim_lf(char* arr, int length){ //function for the trimming of the character
+void str_trim_lf(char* arr, int length){ //function for the trimming of the character, osea que imprima todo el mensaje y al final, donde esta el enter (\n) se transforma en \0, que finaliza el string
 	for(int i=0; i<length; i++){
-		if(arr[i] == '\n'){
+		if(arr[i] == '\n'){ //si el mensaje va a terminar, termina el array donde esta el mensaje
 			arr[i] = '\0';
 			break;
 		}
@@ -62,7 +62,7 @@ void queue_remove(int uid){
 	
 	for(int i=0;i<MAX_CLIENTS; i++){
 		if(clients[i]){
-			if(clients[i] -> uid == uid){
+			if(clients[i]->uid == uid){
 				clients[i] = NULL;
 				break;
 			}
@@ -98,13 +98,33 @@ void send_message(char *s, int uid){
 	pthread_mutex_unlock(&clients_mutex);
 }
 
-//print usuarios
-void print_users(int size){
-	pthread_mutex_lock(&clients_mutex);
+//send private message
+void send_priv_msg(char *s, char *name){
+    pthread_mutex_lock(&clients_mutex);
 
-	for(int i=0;i<size; i++){
+    for(int i=0; i<MAX_CLIENTS; ++i){
+        if(clients[i]){
+            if(strcmp(clients[i]->name, name) == 0){
+                if(write(clients[i]-> sockfd, s, strlen(s)) < 0){
+                    break;
+                }
+            }
+        }
+    }
+
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+//send clients
+void send_clients(char *s, int uid){
+	pthread_mutex_lock(&clients_mutex);
+	
+	printf("Los clientes conectados son: \n");
+	for(int i=0;i<MAX_CLIENTS; i++){
 		if(clients[i]){
-			printf("--%s", clients[i]->name);
+			if(clients[i] -> uid != uid){
+				printf("%s", clients[i]->name);
+			}
 		}
 	}
 	
@@ -112,7 +132,7 @@ void print_users(int size){
 }
 
 void *handle_client(void *arg){
-	char buffer[BUFFER_SZ], name[NAME_LEN];
+	char buffer[BUFFER_SZ], name[NAME_LEN], message[BUFFER_SZ + NAME_LEN];
 	int leave_flag = 0; //flag que indica si esta conectado el cliente o si hay un error para salir del loop
 	cli_count++;
 	
@@ -125,10 +145,9 @@ void *handle_client(void *arg){
 		leave_flag = 1;
 	}else{ //si se recibe correctamente el nombre
 		strcpy(cli->name, name); //copiar nombre en el cli->name
-		sprintf(buffer, "%s has joined the chat.\n", cli->name); //como se unio el cliente, imprimir en el server y a todos los usuarios en el buffer
+		sprintf(buffer, "%s has joined the chat, status [ACTIVO]\n", cli->name); //como se unio el cliente, imprimir en el server y a todos los usuarios en el buffer
 		printf("%s", buffer); //print on the server
-		send_message(buffer, cli->uid);//send to all the clients
-		
+		send_message(buffer, cli->uid);//send to all the clients excepto al nuevo
 	}
 	
 	bzero(buffer, BUFFER_SZ); //set the buffer to 0
@@ -140,34 +159,38 @@ void *handle_client(void *arg){
 		//recibir mensajes de los clientes
 		int recieve = recv(cli->sockfd, buffer, BUFFER_SZ, 0); //recibe socket del cliente, buffer vacio, el tamano del buffer y 0
 		
-		//status del cliente
-		if(strcmp(buffer, "ACTIVO") == 0 || strcmp(buffer, "OCUPADO") == 0 || strcmp(buffer, "INACTIVO") == 0){
-			strcpy(cli->status, buffer);
-			printf("%s cambio su status a %s", name, buffer);
-		}
-		
-		if(strcmp(buffer, "1") == 0){
-			printf("%s se unio al chat publico", name);
-		}else if(strcmp(buffer, "4") == 0){
-			print_users(cli_count);
-		}
 		
 		//condiciones para los mensajes
 		if(recieve > 0){ 
 			if(strlen(buffer) > 0){ //si hay mensajes, se revisa el tamano del buffer que sea mas que 0
 				send_message(buffer, cli->uid); //mandar mensaje a los demas clientes
 				str_trim_lf(buffer, strlen(buffer)); //trimm el buffer para imprimir el mensaje en el server
-				printf("%s\n", buffer); //se imprime el mensaje y muestra que cliente le ha mandado un mensaje a que cliente
+				printf("%s\n", buffer); //se imprime el mensaje y muestra que cliente ha mandado un mensaje
 			}
 		}else if(recieve == 0 || strcmp(buffer, "7") == 0){ //si el cliente envio "exit" o se recibe 0, se desconecta al cliente y se imprime el mensaje
 			sprintf(buffer, "%s has left \n", cli->name);
 			printf("%s\n", buffer);
 			send_message(buffer, cli->uid); //mostrar a todos los clientes que se salio un cliente
 			leave_flag = 1;
+		}else if(strcmp(buffer, "4") == 0){
+			send_clients(cli->name, cli->uid);
+		}else if(strcmp(buffer, "2") == 0){
+			//comparar para ver si mandaron un nombre
+			for(int i = 0; i<MAX_CLIENTS; i++){
+				if(strcmp(buffer, clients[i]->name) == 0){
+					str_trim_lf(buffer, strlen(buffer));
+					if(strlen(buffer) > 0){
+						send_priv_msg(buffer, clients[i]->name);
+						str_trim_lf(buffer, strlen(buffer));
+						printf("%s", buffer);
+					}
+				}
+			}
 		}else{ //cualquier otra opcion es un error
 			printf("ERROR: -1\n");
 			leave_flag = 1;
 		}
+		
 		
 		bzero(buffer, BUFFER_SZ); //se vuelve a vaciar el buffer
 	
@@ -239,7 +262,7 @@ int main (int argc, char **argv){
 			continue;
 		}
 		
-		//Client settings
+		//Client settings -> recibir data de los clientes
 		client_t *cli = (client_t *)malloc(sizeof(client_t));
 		cli->address = cli_addr;
 		cli->sockfd = connfd;
@@ -256,3 +279,4 @@ int main (int argc, char **argv){
 	
 	return EXIT_SUCCESS;
 }
+
